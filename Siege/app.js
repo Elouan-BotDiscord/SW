@@ -430,12 +430,18 @@ async function findPlayersWithMonsters(monsterIds) {
         neededMonsters[mId] = (neededMonsters[mId] || 0) + 1;
     });
     
+    // Convert needed monster keys to integers once
+    const neededMonstersInt = {};
+    for (const [mId, count] of Object.entries(neededMonsters)) {
+        neededMonstersInt[parseInt(mId, 10)] = count;
+    }
+    
     for (const playerName of guildPlayersList) {
         const playerMonsters = await loadPlayerMonsters(playerName);
         const playerMonsterIds = new Set(playerMonsters.map(m => m.unit_master_id));
         
         // Vérifier si le joueur possède tous les monstres
-        const hasAllMonsters = Object.keys(neededMonsters).every(mId => 
+        const hasAllMonsters = Object.keys(neededMonstersInt).every(mId => 
             playerMonsterIds.has(parseInt(mId, 10))
         );
         
@@ -445,17 +451,18 @@ async function findPlayersWithMonsters(monsterIds) {
             const unavailableDetails = [];
             
             let allAvailable = true;
-            for (const [mId, needed] of Object.entries(neededMonsters)) {
-                const availability = monsterAvailability[parseInt(mId, 10)];
+            for (const [mId, needed] of Object.entries(neededMonstersInt)) {
+                const mIdInt = parseInt(mId, 10);
+                const availability = monsterAvailability[mIdInt];
                 const available = availability ? (availability.owned - availability.used) : 0;
                 
                 if (available < needed) {
                     allAvailable = false;
                     // Find where this monster is used
-                    const usedLocations = findMonsterUsageLocations(playerName, parseInt(mId, 10));
+                    const usedLocations = findMonsterUsageLocations(playerName, mIdInt);
                     unavailableDetails.push({
-                        monsterId: parseInt(mId, 10),
-                        monsterName: getMonsterName(parseInt(mId, 10)),
+                        monsterId: mIdInt,
+                        monsterName: getMonsterName(mIdInt),
                         locations: usedLocations
                     });
                 }
