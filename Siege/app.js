@@ -35,7 +35,7 @@ async function loadPlayerMonsters(playerName) {
     }
 }
 
-// Obtenir la liste des monstres disponibles avec leur quantité
+// Get the list of available monsters with their quantities
 function getAvailableMonsters(playerName, playerMonsters) {
     const monsterCounts = {};
     
@@ -62,7 +62,7 @@ function getAvailableMonsters(playerName, playerMonsters) {
     return monsterCounts;
 }
 
-// Obtenir tous les monstres disponibles dans la guilde
+// Get all available monsters in the guild
 async function getAllAvailableMonstersInGuild() {
     const guildMonsters = {};
     
@@ -72,7 +72,7 @@ async function getAllAvailableMonstersInGuild() {
         playerMonsters.forEach(m => {
             const id = m.unit_master_id;
             
-            // Ajouter le monstre à la liste globale
+            // Add monster to global list
             if (!guildMonsters[id]) {
                 guildMonsters[id] = {
                     id: id,
@@ -81,14 +81,14 @@ async function getAllAvailableMonstersInGuild() {
                 };
             }
             
-            // Ajouter le joueur à la liste pour ce monstre
+            // Add player to the list for this monster
             if (!guildMonsters[id].players.includes(playerName)) {
                 guildMonsters[id].players.push(playerName);
             }
         });
     }
     
-    return { guildMonsters };
+    return guildMonsters;
 }
 
 // Trouver les joueurs ayant tous les monstres sélectionnés et disponibles
@@ -364,7 +364,7 @@ async function renderPlayerFirstMode(baseId, slotIndex, slot) {
 
 // Render monsters-first mode (new behavior)
 async function renderMonstersFirstMode(baseId, slotIndex, slot) {
-    const { guildMonsters } = await getAllAvailableMonstersInGuild();
+    const guildMonsters = await getAllAvailableMonstersInGuild();
     
     // Créer une datalist pour tous les monstres de la guilde
     const datalistId = `guild-monsters-${baseId}-${slotIndex}`;
