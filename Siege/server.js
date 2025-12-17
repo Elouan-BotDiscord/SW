@@ -3,7 +3,7 @@ const bodyParser = require('body-parser');
 const app = express();
 const PORT = 3000;
 
-app.use(express.static('public'));
+app.use(express.static('.'));
 app.use(bodyParser.json({ limit: '50mb' }));
 
 // --- DONNÉES EN MÉMOIRE ---
