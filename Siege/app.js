@@ -18,28 +18,19 @@ async function loadPlayerMonsters(playerName) {
     if (!playerName) return [];
     if (playerMonstersCache[playerName]) return playerMonstersCache[playerName];
     
-    const res = await fetch(`/api/player-monsters/${encodeURIComponent(playerName)}`);
-    const monsters = await res.json();
-    playerMonstersCache[playerName] = monsters;
-    return monsters;
-}
-
-// Compter combien de fois un monstre est utilisé par un joueur dans le plan
-function countMonsterUsage(playerName, monsterId) {
-    let count = 0;
-    for (const [baseId, slots] of Object.entries(currentPlan)) {
-        slots.forEach(slot => {
-            if (slot.player === playerName && slot.monsters.includes(monsterId)) {
-                count++;
-            }
-        });
+    try {
+        const res = await fetch(`/api/player-monsters/${encodeURIComponent(playerName)}`);
+        if (!res.ok) {
+            console.error(`Failed to load monsters for ${playerName}`);
+            return [];
+        }
+        const monsters = await res.json();
+        playerMonstersCache[playerName] = monsters;
+        return monsters;
+    } catch (error) {
+        console.error(`Error loading monsters for ${playerName}:`, error);
+        return [];
     }
-    return count;
-}
-
-// Compter combien de copies d'un monstre le joueur possède
-function countMonsterOwned(playerMonsters, monsterId) {
-    return playerMonsters.filter(m => m.unit_master_id === monsterId).length;
 }
 
 // Obtenir la liste des monstres disponibles avec leur quantité
@@ -150,8 +141,7 @@ async function renderBaseDetails(baseId) {
                                     list="${datalistId}"
                                     value="${currentValue}"
                                     data-name="${currentName}"
-                                    onchange="updateSlotMonster(${baseId}, ${index}, ${mIdx}, this.value)"
-                                    oninput="handleMonsterInput(this, '${datalistId}')">
+                                    onchange="updateSlotMonster(${baseId}, ${index}, ${mIdx}, this.value)">
                                 <small class="text-muted">${currentName || 'Aucun'}</small>
                             </div>
                         `;
@@ -195,11 +185,7 @@ async function renderBaseDetails(baseId) {
     }
 }
 
-// Gérer la saisie dans les inputs de monstres
-function handleMonsterInput(input, datalistId) {
-    // Cette fonction peut être étendue pour filtrer en temps réel
-    // Pour l'instant, elle permet juste la saisie
-}
+
 
 // 3. Gestion des mises à jour
 async function updateSlotPlayer(baseId, slotIndex, player) {
