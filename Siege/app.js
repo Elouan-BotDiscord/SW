@@ -3,6 +3,7 @@ let guildPlayersList = [];
 let currentBaseId = null;
 let playerMonstersCache = {}; // Cache des monstres par joueur
 let slotModes = {}; // Store mode for each slot: "player-first" or "monsters-first"
+let tempMonsterSelections = {}; // Temporary storage for monster selections in monsters-first mode
 
 // Chargement initial
 async function loadState() {
@@ -64,7 +65,6 @@ function getAvailableMonsters(playerName, playerMonsters) {
 // Obtenir tous les monstres disponibles dans la guilde
 async function getAllAvailableMonstersInGuild() {
     const guildMonsters = {};
-    const monsterToPlayers = {};
     
     for (const playerName of guildPlayersList) {
         const playerMonsters = await loadPlayerMonsters(playerName);
@@ -85,18 +85,10 @@ async function getAllAvailableMonstersInGuild() {
             if (!guildMonsters[id].players.includes(playerName)) {
                 guildMonsters[id].players.push(playerName);
             }
-            
-            // Mapping monstre -> joueurs
-            if (!monsterToPlayers[id]) {
-                monsterToPlayers[id] = [];
-            }
-            if (!monsterToPlayers[id].includes(playerName)) {
-                monsterToPlayers[id].push(playerName);
-            }
         });
     }
     
-    return { guildMonsters, monsterToPlayers };
+    return { guildMonsters };
 }
 
 // Trouver les joueurs ayant tous les monstres sélectionnés et disponibles
@@ -169,25 +161,14 @@ function setSlotMode(baseId, slotIndex, mode) {
     slotModes[key] = mode;
 }
 
-// Toggle slot mode
-async function toggleSlotMode(baseId, slotIndex) {
-    const currentMode = getSlotMode(baseId, slotIndex);
-    const newMode = currentMode === 'player-first' ? 'monsters-first' : 'player-first';
-    setSlotMode(baseId, slotIndex, newMode);
-    await renderBaseDetails(baseId);
-}
-
 // Update monster selection in monsters-first mode
 async function updateMonsterFirstSelection(baseId, slotIndex, monsterIdx, value) {
     // Store temporary monster selection
     const key = `temp-${baseId}-${slotIndex}`;
-    if (!window.tempMonsterSelections) {
-        window.tempMonsterSelections = {};
+    if (!tempMonsterSelections[key]) {
+        tempMonsterSelections[key] = [null, null, null];
     }
-    if (!window.tempMonsterSelections[key]) {
-        window.tempMonsterSelections[key] = [null, null, null];
-    }
-    window.tempMonsterSelections[key][monsterIdx] = value ? parseInt(value) : null;
+    tempMonsterSelections[key][monsterIdx] = value ? parseInt(value) : null;
     
     // Re-render to update suggested players
     await renderBaseDetails(baseId);
@@ -195,14 +176,25 @@ async function updateMonsterFirstSelection(baseId, slotIndex, monsterIdx, value)
 
 // Assign player with selected monsters in monsters-first mode
 async function assignPlayerWithMonsters(baseId, slotIndex, playerName) {
+    if (!playerName) {
+        alert("Veuillez sélectionner un joueur");
+        return;
+    }
+    
     const key = `temp-${baseId}-${slotIndex}`;
-    const monsters = window.tempMonsterSelections?.[key] || [null, null, null];
+    const monsters = tempMonsterSelections[key] || [null, null, null];
     
     await sendUpdate(baseId, slotIndex, playerName, monsters);
     
     // Clear temporary selection
-    if (window.tempMonsterSelections) {
-        delete window.tempMonsterSelections[key];
+    delete tempMonsterSelections[key];
+}
+
+// Helper function to handle assignment from dropdown
+async function handleAssignFromDropdown(baseId, slotIndex) {
+    const selectElement = document.getElementById(`suggested-player-${baseId}-${slotIndex}`);
+    if (selectElement) {
+        await assignPlayerWithMonsters(baseId, slotIndex, selectElement.value);
     }
 }
 
@@ -386,7 +378,7 @@ async function renderMonstersFirstMode(baseId, slotIndex, slot) {
     
     // Get temporary monster selection or use slot monsters
     const key = `temp-${baseId}-${slotIndex}`;
-    const tempMonsters = window.tempMonsterSelections?.[key] || slot.monsters || [null, null, null];
+    const tempMonsters = tempMonsterSelections[key] || slot.monsters || [null, null, null];
     
     // Monster selection inputs
     let monstersHtml = `
@@ -427,7 +419,7 @@ async function renderMonstersFirstMode(baseId, slotIndex, slot) {
                             `<option value="${p.name}">${p.name} (${p.totalAvailable} monstres dispo)</option>`
                         ).join('')}
                     </select>
-                    <button class="btn btn-success w-100" onclick="assignPlayerWithMonsters(${baseId}, ${slotIndex}, document.getElementById('suggested-player-${baseId}-${slotIndex}').value)">
+                    <button class="btn btn-success w-100" onclick="handleAssignFromDropdown(${baseId}, ${slotIndex})">
                         Assigner
                     </button>
                 </div>
