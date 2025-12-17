@@ -1,8 +1,11 @@
+// Charger les variables d'environnement depuis .env (si le fichier existe)
+require('dotenv').config();
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const { MongoClient } = require('mongodb');
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.static('.'));
 app.use(bodyParser.json({ limit: '50mb' }));

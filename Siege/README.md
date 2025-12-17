@@ -26,14 +26,27 @@ La connexion MongoDB peut être configurée via la variable d'environnement `MON
 
 Par défaut, l'application se connecte à `mongodb://localhost:27017`.
 
+### Configuration avec fichier .env
+
+1. Copier le fichier d'exemple :
+```bash
+cp .env.example .env
+```
+
+2. Éditer `.env` avec vos paramètres :
+```
+MONGODB_URI=mongodb://localhost:27017
+PORT=3000
+```
+
 ### Exemples de configuration
 
-**Local par défaut :**
+**Local par défaut (avec .env) :**
 ```bash
 npm start
 ```
 
-**Avec une URI personnalisée :**
+**Avec une URI personnalisée (ligne de commande) :**
 ```bash
 MONGODB_URI="mongodb://localhost:27017" npm start
 ```
