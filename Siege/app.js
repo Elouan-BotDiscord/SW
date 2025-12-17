@@ -2,6 +2,8 @@ let currentPlan = {};
 let guildPlayersList = [];
 let currentBaseId = null;
 let playerMonstersCache = {}; // Cache des monstres par joueur
+let currentWorkflowMode = 'player-first'; // 'player-first' or 'monsters-first'
+let currentEditingSlot = null; // Track which slot is being edited in monsters-first mode
 
 // Chargement initial
 async function loadState() {
@@ -83,8 +85,18 @@ async function selectBase(id) {
     document.getElementById('welcome-view').style.display = 'none';
     document.getElementById('base-view').style.display = 'block';
     document.getElementById('base-title').innerText = `Base ${id}`;
+    
+    // Setup workflow mode listeners
+    document.getElementById('mode-player-first').addEventListener('change', handleWorkflowChange);
+    document.getElementById('mode-monsters-first').addEventListener('change', handleWorkflowChange);
+    
     renderBasesMenu(); // Pour mettre à jour l'état actif
     await renderBaseDetails(id);
+}
+
+function handleWorkflowChange(e) {
+    currentWorkflowMode = e.target.value;
+    renderBaseDetails(currentBaseId);
 }
 
 // 2. Rendu des 5 slots d'une base
@@ -93,18 +105,25 @@ async function renderBaseDetails(baseId) {
     container.innerHTML = '';
     const slots = currentPlan[baseId];
 
+    if (currentWorkflowMode === 'player-first') {
+        await renderPlayerFirstWorkflow(baseId, slots, container);
+    } else {
+        await renderMonstersFirstWorkflow(baseId, slots, container);
+    }
+}
+
+// Workflow existant: Joueur → Monstres
+async function renderPlayerFirstWorkflow(baseId, slots, container) {
     for (let index = 0; index < slots.length; index++) {
         const slot = slots[index];
         const div = document.createElement('div');
         div.className = 'slot-card';
         
-        // Mode affichage ou édition ? Simple mode édition tout le temps pour ce MVP
         let playerSelect = `<select class="form-select mb-2" onchange="updateSlotPlayer(${baseId}, ${index}, this.value)">
             <option value="">-- Choisir un joueur --</option>
             ${guildPlayersList.map(p => `<option value="${p}" ${slot.player === p ? 'selected' : ''}>${p}</option>`).join('')}
         </select>`;
 
-        // Sélection des monstres avec autocomplétion
         let monstersHtml = '';
         let conflictHtml = '';
         
@@ -112,11 +131,9 @@ async function renderBaseDetails(baseId) {
             const playerMonsters = await loadPlayerMonsters(slot.player);
             const monsterAvailability = getAvailableMonsters(slot.player, playerMonsters);
             
-            // Créer une datalist unique pour ce slot
             const datalistId = `monsters-${baseId}-${index}`;
             let datalistOptions = '';
             
-            // Créer les options basées sur les monstres possédés
             const uniqueMonsters = new Set(playerMonsters.map(m => m.unit_master_id));
             uniqueMonsters.forEach(mId => {
                 const availability = monsterAvailability[mId];
@@ -149,7 +166,6 @@ async function renderBaseDetails(baseId) {
                 </div>
             `;
             
-            // Vérification des conflits de quantité
             const quantityConflicts = [];
             slot.monsters.forEach((mId, idx) => {
                 if (!mId) return;
@@ -159,7 +175,6 @@ async function renderBaseDetails(baseId) {
                 }
             });
             
-            // Vérification des conflits de duplication
             const duplicateConflicts = checkConflicts(slot.player, slot.monsters, baseId, index);
             
             if (quantityConflicts.length > 0 || duplicateConflicts.length > 0) {
@@ -185,6 +200,133 @@ async function renderBaseDetails(baseId) {
     }
 }
 
+// Nouveau workflow: Monstres → Joueur
+async function renderMonstersFirstWorkflow(baseId, slots, container) {
+    for (let index = 0; index < slots.length; index++) {
+        const slot = slots[index];
+        const div = document.createElement('div');
+        div.className = 'slot-card';
+        
+        // Créer une datalist avec tous les monstres de tous les joueurs
+        const datalistId = `all-monsters-${baseId}-${index}`;
+        let allMonstersMap = new Map(); // Map<monsterId, Set<playerName>>
+        
+        for (const playerName of guildPlayersList) {
+            const playerMonsters = await loadPlayerMonsters(playerName);
+            playerMonsters.forEach(m => {
+                const mId = m.unit_master_id;
+                if (!allMonstersMap.has(mId)) {
+                    allMonstersMap.set(mId, new Set());
+                }
+                allMonstersMap.get(mId).add(playerName);
+            });
+        }
+        
+        let datalistOptions = '';
+        allMonstersMap.forEach((players, mId) => {
+            const name = getMonsterName(mId);
+            datalistOptions += `<option value="${mId}">${name}</option>`;
+        });
+        
+        const datalist = `<datalist id="${datalistId}">${datalistOptions}</datalist>`;
+        
+        const monstersHtml = `
+            ${datalist}
+            <div class="d-flex gap-2 flex-wrap mb-2">
+                ${[0, 1, 2].map(mIdx => {
+                    const currentValue = slot.monsters[mIdx] || '';
+                    const currentName = currentValue ? getMonsterName(currentValue) : '';
+                    return `
+                        <div class="flex-fill">
+                            <input type="text" 
+                                class="form-control monster-input" 
+                                placeholder="Rechercher un monstre" 
+                                list="${datalistId}"
+                                value="${currentValue}"
+                                data-name="${currentName}"
+                                onchange="updateMonstersFirstSlotMonster(${baseId}, ${index}, ${mIdx}, this.value)">
+                            <small class="text-muted">${currentName || 'Aucun'}</small>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+        
+        // Afficher les joueurs suggérés si des monstres sont sélectionnés
+        let playerSuggestionsHtml = '';
+        const selectedMonsters = slot.monsters.filter(m => m);
+        
+        if (selectedMonsters.length > 0) {
+            const suggestedPlayers = await findPlayersWithMonsters(selectedMonsters);
+            
+            if (suggestedPlayers.length > 0) {
+                playerSuggestionsHtml = `
+                    <div class="mb-2">
+                        <label class="form-label"><strong>Joueurs suggérés:</strong></label>
+                        <select class="form-select" onchange="selectSuggestedPlayer(${baseId}, ${index}, this.value)">
+                            <option value="">-- Sélectionner un joueur --</option>
+                            ${suggestedPlayers.map(p => 
+                                `<option value="${p}" ${slot.player === p ? 'selected' : ''}>${p}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                `;
+            } else {
+                playerSuggestionsHtml = `
+                    <div class="alert alert-warning">
+                        Aucun joueur ne possède tous ces monstres
+                    </div>
+                `;
+            }
+        }
+        
+        // Affichage du joueur actuellement sélectionné
+        let currentPlayerHtml = '';
+        if (slot.player) {
+            currentPlayerHtml = `<div class="alert alert-info">Joueur: <strong>${slot.player}</strong></div>`;
+        }
+        
+        // Vérifier les conflits
+        let conflictHtml = '';
+        if (slot.player && selectedMonsters.length > 0) {
+            const playerMonsters = await loadPlayerMonsters(slot.player);
+            const monsterAvailability = getAvailableMonsters(slot.player, playerMonsters);
+            
+            const quantityConflicts = [];
+            slot.monsters.forEach((mId, idx) => {
+                if (!mId) return;
+                const availability = monsterAvailability[mId];
+                if (availability && availability.used > availability.owned) {
+                    quantityConflicts.push(`${getMonsterName(mId)}: ${availability.used} utilisé(s) > ${availability.owned} possédé(s)`);
+                }
+            });
+            
+            const duplicateConflicts = checkConflicts(slot.player, slot.monsters, baseId, index);
+            
+            if (quantityConflicts.length > 0 || duplicateConflicts.length > 0) {
+                div.className += ' conflict';
+                conflictHtml = '<div class="conflict-msg">⚠️ Conflit:<br>';
+                if (quantityConflicts.length > 0) {
+                    conflictHtml += quantityConflicts.join('<br>') + '<br>';
+                }
+                if (duplicateConflicts.length > 0) {
+                    conflictHtml += duplicateConflicts.join('<br>');
+                }
+                conflictHtml += '</div>';
+            }
+        }
+        
+        div.innerHTML = `
+            <h5>Emplacement ${index + 1}</h5>
+            ${monstersHtml}
+            ${playerSuggestionsHtml}
+            ${currentPlayerHtml}
+            ${conflictHtml}
+        `;
+        container.appendChild(div);
+    }
+}
+
 
 
 // 3. Gestion des mises à jour
@@ -203,6 +345,50 @@ async function updateSlotMonster(baseId, slotIndex, monsterIdx, value) {
     const newMonsters = [...slot.monsters];
     newMonsters[monsterIdx] = value ? parseInt(value) : null;
     await sendUpdate(baseId, slotIndex, slot.player, newMonsters);
+}
+
+// Mise à jour pour le workflow "monstres d'abord"
+async function updateMonstersFirstSlotMonster(baseId, slotIndex, monsterIdx, value) {
+    const slot = currentPlan[baseId][slotIndex];
+    const newMonsters = [...slot.monsters];
+    newMonsters[monsterIdx] = value ? parseInt(value) : null;
+    // On garde le joueur actuel (peut être null), on met juste à jour les monstres
+    await sendUpdate(baseId, slotIndex, slot.player, newMonsters);
+}
+
+// Sélectionner un joueur suggéré
+async function selectSuggestedPlayer(baseId, slotIndex, player) {
+    const slot = currentPlan[baseId][slotIndex];
+    // Garder les monstres déjà sélectionnés
+    await sendUpdate(baseId, slotIndex, player, slot.monsters);
+}
+
+// Trouver les joueurs qui possèdent tous les monstres sélectionnés
+async function findPlayersWithMonsters(monsterIds) {
+    const playersWithAllMonsters = [];
+    
+    for (const playerName of guildPlayersList) {
+        const playerMonsters = await loadPlayerMonsters(playerName);
+        const playerMonsterIds = new Set(playerMonsters.map(m => m.unit_master_id));
+        
+        // Vérifier si le joueur possède tous les monstres
+        const hasAllMonsters = monsterIds.every(mId => playerMonsterIds.has(parseInt(mId)));
+        
+        if (hasAllMonsters) {
+            // Vérifier également la disponibilité (pas déjà utilisés)
+            const monsterAvailability = getAvailableMonsters(playerName, playerMonsters);
+            const allAvailable = monsterIds.every(mId => {
+                const availability = monsterAvailability[parseInt(mId)];
+                return availability && (availability.owned - availability.used) > 0;
+            });
+            
+            if (allAvailable) {
+                playersWithAllMonsters.push(playerName);
+            }
+        }
+    }
+    
+    return playersWithAllMonsters;
 }
 
 async function sendUpdate(baseId, slotIndex, player, monsters) {
