@@ -191,7 +191,12 @@ async function renderPlayerFirstWorkflow(baseId, slots, container) {
         }
 
         div.innerHTML = `
-            <h5>Emplacement ${index + 1}</h5>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="mb-0">Emplacement ${index + 1}</h5>
+                <button class="btn btn-sm btn-outline-danger" onclick="resetSlot(${baseId}, ${index})" title="Réinitialiser l'emplacement">
+                    <i class="bi bi-trash"></i> Réinitialiser
+                </button>
+            </div>
             ${playerSelect}
             ${monstersHtml}
             ${conflictHtml}
@@ -254,36 +259,69 @@ async function renderMonstersFirstWorkflow(baseId, slots, container) {
         
         // Afficher les joueurs suggérés si des monstres sont sélectionnés
         let playerSuggestionsHtml = '';
+        let currentPlayerHtml = '';
         const selectedMonsters = slot.monsters.filter(m => m);
         
-        if (selectedMonsters.length > 0) {
-            const suggestedPlayers = await findPlayersWithMonsters(selectedMonsters);
+        if (slot.player) {
+            // Si un joueur est déjà assigné, afficher seulement le joueur
+            currentPlayerHtml = `<div class="alert alert-info">Joueur: <strong>${slot.player}</strong></div>`;
+        } else if (selectedMonsters.length > 0) {
+            // Si pas de joueur mais des monstres sélectionnés, afficher les suggestions
+            const { availablePlayers, unavailablePlayers } = await findPlayersWithMonsters(selectedMonsters);
             
-            if (suggestedPlayers.length > 0) {
+            if (availablePlayers.length > 0 || unavailablePlayers.length > 0) {
+                let playersOptionsHtml = '<option value="">-- Sélectionner un joueur --</option>';
+                
+                // Joueurs disponibles (en vert)
+                if (availablePlayers.length > 0) {
+                    playersOptionsHtml += '<optgroup label="✓ Joueurs disponibles">';
+                    availablePlayers.forEach(p => {
+                        playersOptionsHtml += `<option value="${p}">${p}</option>`;
+                    });
+                    playersOptionsHtml += '</optgroup>';
+                }
+                
+                // Joueurs partiellement disponibles (disabled)
+                if (unavailablePlayers.length > 0) {
+                    playersOptionsHtml += '<optgroup label="⚠ Monstres déjà utilisés">';
+                    unavailablePlayers.forEach(playerInfo => {
+                        playersOptionsHtml += `<option value="" disabled>${playerInfo.playerName} - Indisponible</option>`;
+                    });
+                    playersOptionsHtml += '</optgroup>';
+                }
+                
                 playerSuggestionsHtml = `
                     <div class="mb-2">
                         <label class="form-label"><strong>Joueurs suggérés:</strong></label>
                         <select class="form-select" onchange="selectSuggestedPlayer(${baseId}, ${index}, this.value)">
-                            <option value="">-- Sélectionner un joueur --</option>
-                            ${suggestedPlayers.map(p => 
-                                `<option value="${p}" ${slot.player === p ? 'selected' : ''}>${p}</option>`
-                            ).join('')}
+                            ${playersOptionsHtml}
                         </select>
                     </div>
                 `;
+                
+                // Afficher les détails des joueurs indisponibles
+                if (unavailablePlayers.length > 0) {
+                    let unavailableDetailsHtml = '<div class="alert alert-warning mt-2"><small>';
+                    unavailablePlayers.forEach(playerInfo => {
+                        unavailableDetailsHtml += `<strong>${playerInfo.playerName}:</strong> `;
+                        const monsterDetails = playerInfo.unavailableMonsters.map(m => {
+                            const locationStrs = m.locations.map(loc => 
+                                `Base ${loc.baseId} (Slot ${loc.slotIndex + 1})`
+                            ).join(', ');
+                            return `${m.monsterName} utilisé dans ${locationStrs}`;
+                        }).join(' et ');
+                        unavailableDetailsHtml += monsterDetails + '<br>';
+                    });
+                    unavailableDetailsHtml += '</small></div>';
+                    playerSuggestionsHtml += unavailableDetailsHtml;
+                }
             } else {
                 playerSuggestionsHtml = `
                     <div class="alert alert-warning">
-                        Aucun joueur ne possède tous ces monstres
+                        Aucun membre ne possède ces monstres
                     </div>
                 `;
             }
-        }
-        
-        // Affichage du joueur actuellement sélectionné
-        let currentPlayerHtml = '';
-        if (slot.player) {
-            currentPlayerHtml = `<div class="alert alert-info">Joueur: <strong>${slot.player}</strong></div>`;
         }
         
         // Vérifier les conflits
@@ -317,7 +355,12 @@ async function renderMonstersFirstWorkflow(baseId, slots, container) {
         }
         
         div.innerHTML = `
-            <h5>Emplacement ${index + 1}</h5>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="mb-0">Emplacement ${index + 1}</h5>
+                <button class="btn btn-sm btn-outline-danger" onclick="resetSlot(${baseId}, ${index})" title="Réinitialiser l'emplacement">
+                    <i class="bi bi-trash"></i> Réinitialiser
+                </button>
+            </div>
             ${monstersHtml}
             ${playerSuggestionsHtml}
             ${currentPlayerHtml}
@@ -365,35 +408,89 @@ async function selectSuggestedPlayer(baseId, slotIndex, player) {
     await sendUpdate(baseId, slotIndex, player, slot.monsters);
 }
 
+// Réinitialiser un slot
+async function resetSlot(baseId, slotIndex) {
+    if (confirm('Voulez-vous vraiment réinitialiser cet emplacement ?')) {
+        await sendUpdate(baseId, slotIndex, '', []);
+        await loadState();
+    }
+}
+
 // Trouver les joueurs qui possèdent tous les monstres sélectionnés
 async function findPlayersWithMonsters(monsterIds) {
-    const playersWithAllMonsters = [];
+    const availablePlayers = [];
+    const unavailablePlayers = [];
     
     // Convert monsterIds to numbers for consistent comparison
     const numericMonsterIds = monsterIds.map(mId => parseInt(mId, 10)).filter(id => !isNaN(id));
+    
+    // Count how many of each monster we need
+    const neededMonsters = {};
+    numericMonsterIds.forEach(mId => {
+        neededMonsters[mId] = (neededMonsters[mId] || 0) + 1;
+    });
     
     for (const playerName of guildPlayersList) {
         const playerMonsters = await loadPlayerMonsters(playerName);
         const playerMonsterIds = new Set(playerMonsters.map(m => m.unit_master_id));
         
         // Vérifier si le joueur possède tous les monstres
-        const hasAllMonsters = numericMonsterIds.every(mId => playerMonsterIds.has(mId));
+        const hasAllMonsters = Object.keys(neededMonsters).every(mId => 
+            playerMonsterIds.has(parseInt(mId, 10))
+        );
         
         if (hasAllMonsters) {
             // Vérifier également la disponibilité (pas déjà utilisés)
             const monsterAvailability = getAvailableMonsters(playerName, playerMonsters);
-            const allAvailable = numericMonsterIds.every(mId => {
-                const availability = monsterAvailability[mId];
-                return availability && (availability.owned - availability.used) >= 1;
-            });
+            const unavailableDetails = [];
+            
+            let allAvailable = true;
+            for (const [mId, needed] of Object.entries(neededMonsters)) {
+                const availability = monsterAvailability[parseInt(mId, 10)];
+                const available = availability ? (availability.owned - availability.used) : 0;
+                
+                if (available < needed) {
+                    allAvailable = false;
+                    // Find where this monster is used
+                    const usedLocations = findMonsterUsageLocations(playerName, parseInt(mId, 10));
+                    unavailableDetails.push({
+                        monsterId: parseInt(mId, 10),
+                        monsterName: getMonsterName(parseInt(mId, 10)),
+                        locations: usedLocations
+                    });
+                }
+            }
             
             if (allAvailable) {
-                playersWithAllMonsters.push(playerName);
+                availablePlayers.push(playerName);
+            } else {
+                unavailablePlayers.push({
+                    playerName,
+                    unavailableMonsters: unavailableDetails
+                });
             }
         }
     }
     
-    return playersWithAllMonsters;
+    return { availablePlayers, unavailablePlayers };
+}
+
+// Trouver où un monstre est utilisé
+function findMonsterUsageLocations(playerName, monsterId) {
+    const locations = [];
+    
+    for (const [baseId, slots] of Object.entries(currentPlan)) {
+        slots.forEach((slot, slotIndex) => {
+            if (slot.player === playerName && slot.monsters.includes(monsterId)) {
+                locations.push({
+                    baseId: parseInt(baseId),
+                    slotIndex: slotIndex
+                });
+            }
+        });
+    }
+    
+    return locations;
 }
 
 async function sendUpdate(baseId, slotIndex, player, monsters) {
