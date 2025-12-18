@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "Siege/server.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "Siege/server.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "Siege/$1"
+    }
+  ]
+}

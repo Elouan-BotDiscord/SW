@@ -1,143 +1,231 @@
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
+const connectDB = require('./config/database');
+const Player = require('./models/Player');
+const SiegePlan = require('./models/SiegePlan');
+
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.static('.'));
 app.use(bodyParser.json({ limit: '50mb' }));
 
-// --- DONNÉES EN MÉMOIRE ---
-// Stockage des joueurs : { "Pseudo": [ { unit_master_id: 123, ... }, ... ] }
-let guildPlayers = {};
-
-// Stockage des joueurs invités (guests)
-let guestPlayers = new Set(); 
-
-// Stockage du plan de siège
-// Structure : 12 bases, chacune a 5 slots.
-// slot = { player: "Pseudo", monsters: [id1, id2, id3] }
-let siegePlan = {};
-
-// Initialisation des 12 bases vides
-for (let i = 1; i <= 12; i++) {
-    siegePlan[i] = Array(5).fill(null).map(() => ({ player: null, monsters: [] }));
-}
+// Connexion à MongoDB
+connectDB();
 
 // --- API ---
 
 // 1. Récupérer l'état actuel (Plan + Liste des joueurs dispos)
-app.get('/api/state', (req, res) => {
-    // Combiner les joueurs normaux et les guests
-    const allPlayers = Object.keys(guildPlayers);
-    
-    // Ajouter les guests avec un marqueur
-    const playersWithGuests = [
-        ...allPlayers.map(p => ({ name: p, isGuest: false })),
-        ...Array.from(guestPlayers).map(p => ({ name: p, isGuest: true }))
-    ];
-    
-    res.json({
-        plan: siegePlan,
-        players: playersWithGuests,
-        guests: Array.from(guestPlayers)
-    });
+app.get('/api/state', async (req, res) => {
+    try {
+        // Récupérer tous les joueurs
+        const players = await Player.find({});
+        
+        // Séparer joueurs normaux et guests
+        const guildPlayers = players.filter(p => !p.isGuest);
+        const guestPlayers = players.filter(p => p.isGuest);
+        
+        // Créer la liste des joueurs avec marqueur
+        const playersWithGuests = [
+            ...guildPlayers.map(p => ({ name: p.playerName, isGuest: false })),
+            ...guestPlayers.map(p => ({ name: p.playerName, isGuest: true }))
+        ];
+        
+        // Récupérer le plan de siège
+        const siegePlan = await SiegePlan.getCurrentPlan();
+        
+        // Convertir Map en objet pour JSON
+        const planObj = {};
+        siegePlan.bases.forEach((value, key) => {
+            planObj[key] = value;
+        });
+        
+        res.json({
+            plan: planObj,
+            players: playersWithGuests,
+            guests: guestPlayers.map(p => p.playerName)
+        });
+    } catch (error) {
+        console.error('Erreur lors de la récupération de l\'état:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
 });
 
 // 2. Importer un JSON de joueur
-app.post('/api/import', (req, res) => {
-    const { playerName, monsterList } = req.body;
-    
-    // On ne garde que les champs utiles
-    const cleanList = monsterList.map(m => ({
-        unit_master_id: m.unit_master_id,
-        // Ajoutez ici d'autres stats si besoin (hp, atk, spd...)
-    }));
+app.post('/api/import', async (req, res) => {
+    try {
+        const { playerName, monsterList } = req.body;
+        
+        // On ne garde que les champs utiles
+        const cleanList = monsterList.map(m => ({
+            unit_master_id: m.unit_master_id,
+            // Ajoutez ici d'autres stats si besoin (hp, atk, spd...)
+        }));
 
-    guildPlayers[playerName] = cleanList;
-    console.log(`[IMPORT] Joueur ${playerName} importé (${cleanList.length} monstres).`);
-    res.json({ success: true, message: "Import réussi" });
+        // Créer ou mettre à jour le joueur
+        await Player.findOneAndUpdate(
+            { playerName },
+            { playerName, monsters: cleanList, isGuest: false },
+            { upsert: true, new: true }
+        );
+
+        console.log(`[IMPORT] Joueur ${playerName} importé (${cleanList.length} monstres).`);
+        res.json({ success: true, message: "Import réussi" });
+    } catch (error) {
+        console.error('Erreur lors de l\'import:', error);
+        res.status(500).json({ error: 'Erreur lors de l\'import' });
+    }
 });
 
 // 3. Mettre à jour une défense
-app.post('/api/update-defense', (req, res) => {
-    const { baseId, slotIndex, player, monsters } = req.body; // monsters = [id1, id2, id3]
-    
-    if (!siegePlan[baseId]) return res.status(400).json({ error: "Base invalide" });
+app.post('/api/update-defense', async (req, res) => {
+    try {
+        const { baseId, slotIndex, player, monsters } = req.body; // monsters = [id1, id2, id3]
+        
+        const siegePlan = await SiegePlan.getCurrentPlan();
+        
+        const baseKey = String(baseId);
+        if (!siegePlan.bases.has(baseKey)) {
+            return res.status(400).json({ error: "Base invalide" });
+        }
 
-    // Mise à jour du plan
-    siegePlan[baseId][slotIndex] = { player, monsters };
-    
-    console.log(`[UPDATE] Base ${baseId} Slot ${slotIndex+1} mis à jour.`);
-    res.json({ success: true, plan: siegePlan });
+        // Mise à jour du slot
+        const baseSlots = siegePlan.bases.get(baseKey);
+        if (slotIndex >= 0 && slotIndex < baseSlots.length) {
+            baseSlots[slotIndex] = { player, monsters };
+            siegePlan.bases.set(baseKey, baseSlots);
+            
+            // Sauvegarder dans la base de données
+            await siegePlan.save();
+            
+            console.log(`[UPDATE] Base ${baseId} Slot ${slotIndex+1} mis à jour.`);
+            
+            // Convertir Map en objet pour JSON
+            const planObj = {};
+            siegePlan.bases.forEach((value, key) => {
+                planObj[key] = value;
+            });
+            
+            res.json({ success: true, plan: planObj });
+        } else {
+            res.status(400).json({ error: "Index de slot invalide" });
+        }
+    } catch (error) {
+        console.error('Erreur lors de la mise à jour:', error);
+        res.status(500).json({ error: 'Erreur lors de la mise à jour' });
+    }
 });
 
 // 4. Recherche de monstres d'un joueur (pour le frontend)
-app.get('/api/player-monsters/:playerName', (req, res) => {
-    const { playerName } = req.params;
-    
-    // Si c'est un guest, retourner un marqueur spécial
-    if (guestPlayers.has(playerName)) {
-        res.json({ isGuest: true, monsters: [] });
-        return;
+app.get('/api/player-monsters/:playerName', async (req, res) => {
+    try {
+        const { playerName } = req.params;
+        
+        const player = await Player.findOne({ playerName });
+        
+        if (!player) {
+            return res.json([]);
+        }
+        
+        // Si c'est un guest, retourner un marqueur spécial
+        if (player.isGuest) {
+            res.json({ isGuest: true, monsters: [] });
+            return;
+        }
+        
+        res.json(player.monsters || []);
+    } catch (error) {
+        console.error('Erreur lors de la récupération des monstres:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
-    
-    const monsters = guildPlayers[playerName] || [];
-    res.json(monsters);
 });
 
 // 5. Ajouter un guest
-app.post('/api/add-guest', (req, res) => {
-    const { guestName } = req.body;
-    
-    if (!guestName || guestName.trim() === '') {
-        return res.status(400).json({ error: "Le nom du guest ne peut pas être vide" });
+app.post('/api/add-guest', async (req, res) => {
+    try {
+        const { guestName } = req.body;
+        
+        if (!guestName || guestName.trim() === '') {
+            return res.status(400).json({ error: "Le nom du guest ne peut pas être vide" });
+        }
+        
+        // Vérifier si un joueur (guest ou normal) existe déjà avec ce nom
+        const existingPlayer = await Player.findOne({ playerName: guestName });
+        
+        if (existingPlayer) {
+            if (existingPlayer.isGuest) {
+                return res.status(400).json({ error: "Ce guest existe déjà" });
+            } else {
+                return res.status(400).json({ error: "Un joueur avec ce nom existe déjà" });
+            }
+        }
+        
+        // Créer le guest
+        await Player.create({
+            playerName: guestName,
+            monsters: [],
+            isGuest: true
+        });
+        
+        console.log(`[ADD GUEST] Guest ${guestName} ajouté.`);
+        
+        // Récupérer la liste mise à jour des guests
+        const guests = await Player.find({ isGuest: true });
+        
+        res.json({ 
+            success: true, 
+            message: "Guest ajouté avec succès",
+            guests: guests.map(g => g.playerName)
+        });
+    } catch (error) {
+        console.error('Erreur lors de l\'ajout du guest:', error);
+        res.status(500).json({ error: 'Erreur lors de l\'ajout du guest' });
     }
-    
-    // Vérifier si le guest existe déjà
-    if (guestPlayers.has(guestName)) {
-        return res.status(400).json({ error: "Ce guest existe déjà" });
-    }
-    
-    // Vérifier si un joueur normal existe avec ce nom
-    if (guildPlayers[guestName]) {
-        return res.status(400).json({ error: "Un joueur avec ce nom existe déjà" });
-    }
-    
-    guestPlayers.add(guestName);
-    console.log(`[ADD GUEST] Guest ${guestName} ajouté.`);
-    
-    res.json({ 
-        success: true, 
-        message: "Guest ajouté avec succès",
-        guests: Array.from(guestPlayers)
-    });
 });
 
 // 6. Supprimer un guest
-app.delete('/api/remove-guest/:guestName', (req, res) => {
-    const { guestName } = req.params;
-    
-    if (!guestPlayers.has(guestName)) {
-        return res.status(404).json({ error: "Guest non trouvé" });
-    }
-    
-    // Nettoyer les assignations de ce guest dans le plan de siège
-    for (const [baseId, slots] of Object.entries(siegePlan)) {
-        slots.forEach((slot, index) => {
-            if (slot.player === guestName) {
-                siegePlan[baseId][index] = { player: null, monsters: [] };
-            }
+app.delete('/api/remove-guest/:guestName', async (req, res) => {
+    try {
+        const { guestName } = req.params;
+        
+        const guest = await Player.findOne({ playerName: guestName, isGuest: true });
+        
+        if (!guest) {
+            return res.status(404).json({ error: "Guest non trouvé" });
+        }
+        
+        // Nettoyer les assignations de ce guest dans le plan de siège
+        const siegePlan = await SiegePlan.getCurrentPlan();
+        
+        siegePlan.bases.forEach((slots, baseId) => {
+            slots.forEach((slot, index) => {
+                if (slot.player === guestName) {
+                    slots[index] = { player: null, monsters: [] };
+                }
+            });
+            siegePlan.bases.set(baseId, slots);
         });
+        
+        await siegePlan.save();
+        
+        // Supprimer le guest
+        await Player.deleteOne({ playerName: guestName, isGuest: true });
+        
+        console.log(`[REMOVE GUEST] Guest ${guestName} supprimé.`);
+        
+        // Récupérer la liste mise à jour des guests
+        const guests = await Player.find({ isGuest: true });
+        
+        res.json({ 
+            success: true, 
+            message: "Guest supprimé avec succès",
+            guests: guests.map(g => g.playerName)
+        });
+    } catch (error) {
+        console.error('Erreur lors de la suppression du guest:', error);
+        res.status(500).json({ error: 'Erreur lors de la suppression du guest' });
     }
-    
-    guestPlayers.delete(guestName);
-    console.log(`[REMOVE GUEST] Guest ${guestName} supprimé.`);
-    
-    res.json({ 
-        success: true, 
-        message: "Guest supprimé avec succès",
-        guests: Array.from(guestPlayers)
-    });
 });
 
 app.listen(PORT, () => {
