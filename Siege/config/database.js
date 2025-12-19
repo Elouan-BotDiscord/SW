@@ -21,7 +21,9 @@ const connectDB = async () => {
         console.log('MongoDB connecté avec succès');
     } catch (error) {
         console.error('Erreur de connexion MongoDB:', error);
-        throw error;
+        console.warn('⚠️  L\'application continuera sans base de données');
+        // Don't throw error - allow the app to continue for static file serving
+        // API routes will fail gracefully if database is needed
     }
 };
 

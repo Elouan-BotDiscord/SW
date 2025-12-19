@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 const connectDB = require('./config/database');
 const Player = require('./models/Player');
 const SiegePlan = require('./models/SiegePlan');
@@ -9,7 +10,8 @@ const SiegePlan = require('./models/SiegePlan');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.static('.'));
+// Serve static files from the current directory using absolute path
+app.use(express.static(path.join(__dirname)));
 app.use(bodyParser.json({ limit: '50mb' }));
 
 // Configuration du rate limiting
@@ -249,6 +251,20 @@ app.delete('/api/remove-guest/:guestName', async (req, res) => {
         console.error('Erreur lors de la suppression du guest:', error);
         res.status(500).json({ error: 'Erreur lors de la suppression du guest' });
     }
+});
+
+// Handle favicon requests to avoid 404 errors
+app.get('/favicon.ico', (req, res) => {
+    res.status(204).end(); // No content
+});
+
+app.get('/favicon.png', (req, res) => {
+    res.status(204).end(); // No content
+});
+
+// Serve index.html for root path
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // Démarrer le serveur seulement en local (pas sur Vercel)
