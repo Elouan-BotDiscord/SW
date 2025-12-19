@@ -25,7 +25,7 @@ Ce projet a été amélioré pour prendre en charge MongoDB comme système de st
 ### 2. Migration du code serveur
 
 #### Refactorisation de `server.js`:
-Toutes les routes API ont été converties pour utiliser MongoDB:
+Toutes les routes API ont été converties pour utiliser MongoDB et correctement configurées pour Vercel:
 
 1. **GET `/api/state`**: Récupère l'état complet depuis MongoDB
 2. **POST `/api/import`**: Importe/met à jour un joueur dans MongoDB
@@ -33,6 +33,11 @@ Toutes les routes API ont été converties pour utiliser MongoDB:
 4. **GET `/api/player-monsters/:playerName`**: Récupère les monstres d'un joueur
 5. **POST `/api/add-guest`**: Ajoute un guest dans MongoDB
 6. **DELETE `/api/remove-guest/:guestName`**: Supprime un guest et nettoie les assignations
+
+#### Compatibilité Vercel serverless:
+- **Export du module**: `module.exports = app` pour les fonctions serverless
+- **Conditionnement de app.listen()**: N'écoute que localement (`!process.env.VERCEL`)
+- **Correction du bug "Cannot GET /"**: L'app est maintenant correctement exportée pour Vercel
 
 #### Améliorations de sécurité:
 - **Rate limiting**: Protection contre les abus (100 requêtes/15min par IP)
