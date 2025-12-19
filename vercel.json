@@ -12,6 +12,14 @@
       "dest": "Siege/server.js"
     },
     {
+      "src": "/app.js",
+      "dest": "Siege/app.js"
+    },
+    {
+      "src": "/mapping.js",
+      "dest": "Siege/mapping.js"
+    },
+    {
       "src": "/(.*)",
       "dest": "Siege/server.js"
     }
