@@ -15,7 +15,14 @@ function isGuest(playerName) {
 async function loadState() {
     const res = await fetch('/api/state');
     const data = await res.json();
-    currentPlan = data.plan;
+    currentPlan = data.plan || {};
+    
+    // Initialiser les bases manquantes avec des slots vides
+    for (let i = 1; i <= 12; i++) {
+        if (!currentPlan[i]) {
+            currentPlan[i] = Array.from({ length: 5 }, () => ({ player: null, monsters: [] }));
+        }
+    }
     
     // Gérer le format de la liste des joueurs (peut être un tableau d'objets ou de strings)
     if (data.players && data.players.length > 0 && typeof data.players[0] === 'object') {
@@ -119,7 +126,9 @@ function renderBasesMenu() {
     const container = document.getElementById('bases-container');
     container.innerHTML = '';
     for (let i = 1; i <= 12; i++) {
-        const filledSlots = currentPlan[i].filter(s => s.player).length;
+        // Vérifier que la base existe avant d'accéder à ses slots
+        const baseSlots = currentPlan[i] || [];
+        const filledSlots = baseSlots.filter(s => s.player).length;
         const btn = document.createElement('div');
         btn.className = 'col-4'; // 3 par ligne
         btn.innerHTML = `
@@ -155,6 +164,12 @@ function handleWorkflowChange(e) {
 async function renderBaseDetails(baseId) {
     const container = document.getElementById('slots-container');
     container.innerHTML = '';
+    
+    // Vérifier que la base existe
+    if (!currentPlan[baseId]) {
+        currentPlan[baseId] = Array.from({ length: 5 }, () => ({ player: null, monsters: [] }));
+    }
+    
     const slots = currentPlan[baseId];
 
     if (currentWorkflowMode === 'player-first') {
