@@ -63,7 +63,16 @@ app.get('/api/state', async (req, res) => {
         });
     } catch (error) {
         console.error('Erreur lors de la récupération de l\'état:', error);
-        res.status(500).json({ error: 'Erreur serveur' });
+        // Return default empty state instead of error to allow UI to function
+        const defaultPlan = {};
+        for (let i = 1; i <= 12; i++) {
+            defaultPlan[i] = Array.from({ length: 5 }, () => ({ player: null, monsters: [] }));
+        }
+        res.json({
+            plan: defaultPlan,
+            players: [],
+            guests: []
+        });
     }
 });
 

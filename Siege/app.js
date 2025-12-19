@@ -13,25 +13,36 @@ function isGuest(playerName) {
 
 // Chargement initial
 async function loadState() {
-    const res = await fetch('/api/state');
-    const data = await res.json();
-    currentPlan = data.plan || {};
-    
-    // Initialiser les bases manquantes avec des slots vides
-    for (let i = 1; i <= 12; i++) {
-        if (!currentPlan[i]) {
+    try {
+        const res = await fetch('/api/state');
+        const data = await res.json();
+        currentPlan = data.plan || {};
+        
+        // Initialiser les bases manquantes avec des slots vides
+        for (let i = 1; i <= 12; i++) {
+            if (!currentPlan[i]) {
+                currentPlan[i] = Array.from({ length: 5 }, () => ({ player: null, monsters: [] }));
+            }
+        }
+        
+        // Gérer le format de la liste des joueurs (peut être un tableau d'objets ou de strings)
+        if (data.players && data.players.length > 0 && typeof data.players[0] === 'object') {
+            guildPlayersList = data.players.map(p => p.name);
+        } else {
+            guildPlayersList = data.players || [];
+        }
+        
+        guestPlayersList = data.guests || [];
+    } catch (error) {
+        console.error('Erreur lors du chargement de l\'état:', error);
+        // Initialize with empty default state so UI still works
+        currentPlan = {};
+        for (let i = 1; i <= 12; i++) {
             currentPlan[i] = Array.from({ length: 5 }, () => ({ player: null, monsters: [] }));
         }
+        guildPlayersList = [];
+        guestPlayersList = [];
     }
-    
-    // Gérer le format de la liste des joueurs (peut être un tableau d'objets ou de strings)
-    if (data.players && data.players.length > 0 && typeof data.players[0] === 'object') {
-        guildPlayersList = data.players.map(p => p.name);
-    } else {
-        guildPlayersList = data.players || [];
-    }
-    
-    guestPlayersList = data.guests || [];
     
     renderBasesMenu();
     renderGuestList();
