@@ -114,6 +114,14 @@ Si vous voyez "Erreur de connexion MongoDB":
 - Vérifiez que `MONGODB_URI` est bien configurée dans Vercel
 - Regardez les logs pour voir s'il y a des erreurs de connexion
 
+### Erreur 404 pour app.js et mapping.js (boutons ne fonctionnent pas)
+
+Si vous voyez des erreurs 404 dans les logs Vercel pour `/app.js` et `/mapping.js` et que les boutons ne fonctionnent pas:
+- Cette erreur a été corrigée dans la configuration `vercel.json`
+- Assurez-vous d'utiliser la dernière version du code
+- Le fichier `vercel.json` doit contenir des routes explicites pour `app.js` et `mapping.js` avant la route catch-all
+- Redéployez l'application après avoir mis à jour `vercel.json`
+
 ## Mise à jour de l'application
 
 Pour mettre à jour votre application:
